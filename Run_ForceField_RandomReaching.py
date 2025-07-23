@@ -1,4 +1,6 @@
 #SETUP FROM ORIGINAL NOTEBOOK, INCLDUING GRU TRAINING FUNCTIONS.
+#select the correct virtual environment using venv, this is located in this folder: "/user/home/as15635/NeuroMatch/NeuroMatch25/.venv"
+#set env:
 
 # set the random seed for reproducibility
 import random
@@ -19,7 +21,7 @@ dotenv.load_dotenv(override=True)
 HOME_DIR = os.getenv("HOME_DIR")
 if HOME_DIR is None:
     HOME_DIR = ""
-print(HOME_DIR)
+print(HOME_DIR, flush=True)
 
 import torch
 
@@ -32,12 +34,6 @@ from ctd.task_modeling.model.rnn import GRU_RNN
 from ctd.task_modeling.datamodule.task_datamodule import TaskDataModule
 from ctd.task_modeling.task_wrapper.task_wrapper import TaskTrainedWrapper
 from pytorch_lightning import Trainer
-
-
-
-
-# DEFINE NEW FORCE FIELD RANDOMTARGET CLASS:
-# forcefield class version:
 from motornet.environment import Environment
 import gymnasium as gym
 from gymnasium import spaces
@@ -48,6 +44,35 @@ from typing import Union, Optional, Any
 from torch import Tensor
 from numpy import ndarray
 from ctd.task_modeling.task_env.loss_func import RandomTargetLoss
+
+#take in arguments from command line, structured as follows: python Run_ForceField_RandomReaching.py --task_id ${SLURM_ARRAY_TASK_ID} --num_epochs 50 --num_samples 1000 --batch_size 256 --learning_rate 1e-8 --weight_decay 0.0001 --latent_size 128 --force_field_strength_x "0.1" --force_field_strength_y "0.0"
+print("loading command line arguments", flush=True)
+import argparse
+parser = argparse.ArgumentParser(description='Run Force Field Random Reaching Task')
+parser.add_argument('--task_id', type=int, default=0, help='Task ID for the SLURM array job')
+parser.add_argument('--num_tasks', type=int, default=1, help='Total number of tasks to run')
+parser.add_argument('--num_epochs', type=int, default=1000, help='Number of epochs to train the model')
+parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training')
+parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for the optimizer')
+parser.add_argument('--latent_size', type=int, default=128, help='Hidden size for the GRU model')
+parser.add_argument('--weight_decay', type=float, default=1e-8, help='Weight decay for the optimizer')
+parser.add_argument('--num_samples', type=int, default=1000, help='Number of samples to generate for the dataset')
+parser.add_argument('--force_field_strength_x', type=str, default="0.1", help='Strength of the force field to apply in the task')
+parser.add_argument('--force_field_strength_y', type=str, default="0.0", help='Strength of the force field to apply in the task in the y direction')
+parser.add_argument('--force_field_bool', type=str, default="FALSE", help='Whether to apply a force field in the task or not. If set to "TRUE", a force field will be applied. If set to "FALSE", no force field will be applied.')
+args = parser.parse_args()
+# Convert force field strengths from string to float
+print("Converting force field strengths from string to float", flush=True)
+args.force_field_strength_x = float(args.force_field_strength_x)
+args.force_field_strength_y = float(args.force_field_strength_y)
+#set force field:
+print("Defining force field", flush=True)
+force_field= np.array([[args.force_field_strength_x, args.force_field_strength_y]])
+
+# DEFINE NEW FORCE FIELD RANDOMTARGET CLASS:
+# forcefield class version:
+print("Force field is", force_field, flush=True)
+print("creating class RandomTarget_forcefield", flush=True)
 class RandomTarget_forcefield(Environment):
     """A reach to a random target from a random starting position with a delay period.
 
@@ -68,7 +93,7 @@ class RandomTarget_forcefield(Environment):
     def __init__(self, *args, **kwargs):
         #putting forcefield here so it isnt used as kwarg for parent class.
         self.force_field = kwargs.pop("force_field", np.array([[0, 0]]))
-        print("force field is", self.force_field)
+        print("force field is", self.force_field, flush=True)
         super().__init__(*args, **kwargs)
 
         self.obs_noise[: self.skeleton.space_dim] = [
@@ -324,90 +349,132 @@ class RandomTarget_forcefield(Environment):
         }
         return obs, info
 
+n_epochs= args.num_epochs
+print("RandomTarget_forcefield class created.", flush=True)
+
+if args.force_field_bool == "FALSE":
+    print("Running no force field random reaching task", flush=True)
+
+    ### Run force field free training:
+    
+
+    # Create the analysis object:
+    print("Creating RandomTarget task environment without force field", flush=True)
+    rt_task_env_no_force_field = RandomTarget(effector = RigidTendonArm26(muscle = MujocoHillMuscle()))
+    print("RandomTarget task environment without force field created", flush=True)
+    # Step 1: Instantiate the model
+    print("Instantiating GRU_RNN model", flush=True)
+    rnn = GRU_RNN(latent_size = 128) # Look in ctd/task_modeling/models for alternative choices!
+    print("GRU_RNN model instantiated", flush=True)
+    print("Instantiating task environment", flush=True)
+    # Step 2: Instantiate the task environment
+    task_env = rt_task_env_no_force_field
+    print("Task environment instantiated", flush=True)
+    print("Instantiating task datamodule", flush=True)
+    # Step 3: Instantiate the task datamodule
+    task_datamodule = TaskDataModule(task_env, n_samples = 1000, batch_size = 256)
+    print("Task datamodule instantiated", flush=True)
+    print("Instantiating task wrapper", flush=True)
+    # Step 4: Instantiate the task wrapper
+    task_wrapper = TaskTrainedWrapper(learning_rate=1e-3, weight_decay = 1e-8)
+    print("Task wrapper instantiated", flush=True)
+
+    print("Initializing model with input and output sizes", flush=True)
+    # Step 5: Initialize the model with the input and output sizes
+    rnn.init_model(
+        input_size = task_env.observation_space.shape[0] + task_env.context_inputs.shape[0],
+        output_size = task_env.action_space.shape[0]
+        )
+    print("Model initialized with input and output sizes", flush=True)
+    # Step 6:  Set the environment and model in the task wrapper
+    print("Setting environment and model in task wrapper", flush=True)
+    task_wrapper.set_environment(task_env)
+    task_wrapper.set_model(rnn)
+    print("Environment and model set in task wrapper", flush=True)
+
+    print("Defining PyTorch Lightning Trainer object", flush=True)
+    # Step 7: Define the PyTorch Lightning Trainer object (put `enable_progress_bar=True` to observe training progress)
+    trainer = Trainer(accelerator= "cpu",max_epochs=n_epochs,enable_progress_bar=True)
+    print("PyTorch Lightning Trainer object defined", flush=True)
+
+    print("Fitting the model", flush=True)
+    # Step 8: Fit the model
+    trainer.fit(task_wrapper, task_datamodule)
+    print("Model fitted", flush=True)
+
+    print("Saving model and datamodule", flush=True)
+    save_dir = pathlib.Path(HOME_DIR) / f"models_randtarg{n_epochs}_noforcefield"
+    save_dir.mkdir(exist_ok=True)
+    with open(save_dir / "model.pkl", "wb") as f:
+        pickle.dump(task_wrapper, f)
+
+    # save datamodule as .pkl
+    with open(save_dir / "datamodule_sim.pkl", "wb") as f:
+        pickle.dump(task_datamodule, f)
+
+    print("Model and datamodule saved", flush=True)
+elif args.force_field_bool == "TRUE":
+
+    print("Force field training is set to TRUE, proceeding with force field training.", flush=True)
+
+    ### Run force field training:
+
+    #force field is defined at the start, from cl arguments.
+    print("Creating RandomTarget task environment with force field", flush=True)
+    rt_task_env_force_field = RandomTarget_forcefield(effector = RigidTendonArm26(muscle = MujocoHillMuscle()),force_field=force_field)
+    print("RandomTarget task environment with force field created", flush=True)
+    # Step 1: Instantiate the model
+    print("Instantiating GRU_RNN model", flush=True)
+    rnn = GRU_RNN(latent_size = 128)
+    print("GRU_RNN model instantiated", flush=True)
+
+    # Step 2: Instantiate the task environment
+    print("Instantiating task environment with force field", flush=True)
+    task_env = rt_task_env_force_field
+    print("Task environment with force field instantiated", flush=True)
+
+    # Step 3: Instantiate the task datamodule
+    print("Instantiating task datamodule with force field", flush=True)
+    task_datamodule = TaskDataModule(task_env, n_samples = 1000, batch_size = 256)
+    print("Task datamodule with force field instantiated", flush=True)
+
+    # Step 4: Instantiate the task wrapper
+    print("Instantiating task wrapper with force field", flush=True)
+    task_wrapper = TaskTrainedWrapper(learning_rate=1e-3, weight_decay = 1e-8)
+    print("Task wrapper with force field instantiated", flush=True)
+
+    # Step 5: Initialize the model with the input and output sizes
+    print("Initializing model with input and output sizes for force field task", flush=True)
+    rnn.init_model(
+        input_size = task_env.observation_space.shape[0] + task_env.context_inputs.shape[0],
+        output_size = task_env.action_space.shape[0]
+        )
+    print("Model initialized with input and output sizes for force field task", flush=True)
 
 
+    # Step 6:  Set the environment and model in the task wrapper
+    print("Setting environment and model in task wrapper for force field task", flush=True)
+    task_wrapper.set_environment(task_env)
+    task_wrapper.set_model(rnn)
+    print("Environment and model set in task wrapper for force field task", flush=True)
 
-### Run force field free training:
-n_epochs=100
+    # Step 7: Define the PyTorch Lightning Trainer object (put `enable_progress_bar=True` to observe training progress)
+    print("Defining PyTorch Lightning Trainer object for force field task", flush=True)
+    trainer = Trainer(accelerator= "cpu",max_epochs=n_epochs,enable_progress_bar=True)
+    print("PyTorch Lightning Trainer object defined for force field task", flush=True)
 
-# Create the analysis object:
-rt_task_env_no_force_field = RandomTarget(effector = RigidTendonArm26(muscle = MujocoHillMuscle()))
+    # Step 8: Fit the model
+    print("Fitting the model for force field task", flush=True)
+    trainer.fit(task_wrapper, task_datamodule)
+    print("Model fitted for force field task", flush=True)
 
-# Step 1: Instantiate the model
-rnn = GRU_RNN(latent_size = 128) # Look in ctd/task_modeling/models for alternative choices!
+    print("Saving model and datamodule for force field task", flush=True)
+    save_dir = pathlib.Path(HOME_DIR) / f"models_randtarg{n_epochs}_forcefield_x{force_field[0,0]}_y{force_field[0,1]}"
+    save_dir.mkdir(exist_ok=True)
+    with open(save_dir / "model.pkl", "wb") as f:
+        pickle.dump(task_wrapper, f)
 
-# Step 2: Instantiate the task environment
-task_env = rt_task_env_no_force_field
-
-# Step 3: Instantiate the task datamodule
-task_datamodule = TaskDataModule(task_env, n_samples = 1000, batch_size = 256)
-
-# Step 4: Instantiate the task wrapper
-task_wrapper = TaskTrainedWrapper(learning_rate=1e-3, weight_decay = 1e-8)
-
-# Step 5: Initialize the model with the input and output sizes
-rnn.init_model(
-    input_size = task_env.observation_space.shape[0] + task_env.context_inputs.shape[0],
-    output_size = task_env.action_space.shape[0]
-    )
-
-# Step 6:  Set the environment and model in the task wrapper
-task_wrapper.set_environment(task_env)
-task_wrapper.set_model(rnn)
-
-# Step 7: Define the PyTorch Lightning Trainer object (put `enable_progress_bar=True` to observe training progress)
-trainer = Trainer(accelerator= "cpu",max_epochs=n_epochs,enable_progress_bar=False)
-
-# Step 8: Fit the model
-trainer.fit(task_wrapper, task_datamodule)
-
-save_dir = pathlib.Path(HOME_DIR) / f"models_randtarg{n_epochs}_noforcefield"
-save_dir.mkdir(exist_ok=True)
-with open(save_dir / "model.pkl", "wb") as f:
-    pickle.dump(task_wrapper, f)
-
-# save datamodule as .pkl
-with open(save_dir / "datamodule_sim.pkl", "wb") as f:
-    pickle.dump(task_datamodule, f)
-
-
-### Run force field training:
-
-force_field= np.array([[-100, 10]]) #example force field, 100N to the left, 10N up.
-rt_task_env_force_field = RandomTarget_forcefield(effector = RigidTendonArm26(muscle = MujocoHillMuscle()),force_field=force_field)
-# Step 1: Instantiate the model
-rnn = GRU_RNN(latent_size = 128)
-
-# Step 2: Instantiate the task environment
-task_env = rt_task_env_force_field
-
-# Step 3: Instantiate the task datamodule
-task_datamodule = TaskDataModule(task_env, n_samples = 1000, batch_size = 256)
-
-# Step 4: Instantiate the task wrapper
-task_wrapper = TaskTrainedWrapper(learning_rate=1e-3, weight_decay = 1e-8)
-
-# Step 5: Initialize the model with the input and output sizes
-rnn.init_model(
-    input_size = task_env.observation_space.shape[0] + task_env.context_inputs.shape[0],
-    output_size = task_env.action_space.shape[0]
-    )
-
-# Step 6:  Set the environment and model in the task wrapper
-task_wrapper.set_environment(task_env)
-task_wrapper.set_model(rnn)
-
-# Step 7: Define the PyTorch Lightning Trainer object (put `enable_progress_bar=True` to observe training progress)
-trainer = Trainer(accelerator= "cpu",max_epochs=n_epochs,enable_progress_bar=False)
-
-# Step 8: Fit the model
-trainer.fit(task_wrapper, task_datamodule)
-
-save_dir = pathlib.Path(HOME_DIR) / f"models_randtarg{n_epochs}_forcefield_x{force_field[0,0]}_y{force_field[0,1]}"
-save_dir.mkdir(exist_ok=True)
-with open(save_dir / "model.pkl", "wb") as f:
-    pickle.dump(task_wrapper, f)
-
-# save datamodule as .pkl
-with open(save_dir / "datamodule_sim.pkl", "wb") as f:
-    pickle.dump(task_datamodule, f)
+    # save datamodule as .pkl
+    with open(save_dir / "datamodule_sim.pkl", "wb") as f:
+        pickle.dump(task_datamodule, f)
+    print("Model and datamodule saved for force field task", flush=True)
