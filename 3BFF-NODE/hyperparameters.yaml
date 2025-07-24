@@ -1,0 +1,22 @@
+model:
+  class: NODE_CUDA
+  latent_size: 14
+  num_layers: 9
+  layer_hidden_size: 115
+  input_size: 3
+  output_size: 3
+optimizer:
+  learning_rate: 0.009882137836632169
+  weight_decay: 7.818171552783113e-11
+data:
+  n_samples: 1000
+  batch_size: 256
+training:
+  max_epochs: 1000
+  log_every_n_steps: 1
+  num_sanity_val_steps: 0
+artifacts:
+  model_pkl: /home/sofiataveira/Documents/sofia/neuroai/ComputationThruDynamicsBenchmark/models_NODE_7_test3/model.pkl
+  datamodule_pkl: /home/sofiataveira/Documents/sofia/neuroai/ComputationThruDynamicsBenchmark/models_NODE_7_test3/datamodule_sim.pkl
+  loss_png: /home/sofiataveira/Documents/sofia/neuroai/ComputationThruDynamicsBenchmark/models_NODE_7_test3/loss_curves.png
+  loss_csv: /home/sofiataveira/Documents/sofia/neuroai/ComputationThruDynamicsBenchmark/models_NODE_7_test3/loss_curves.csv
